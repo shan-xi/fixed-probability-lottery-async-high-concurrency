@@ -89,7 +89,8 @@ Nginx load balancer
 
 `POST /api/lottery/draws` creates a `PENDING` draw and its outbox event in the **same PostgreSQL transaction**. The API
 returns `202 Accepted` immediately with `drawId`, `status`, `campaignMonth`, and `statusUrl`; it does not wait for Kafka
-or the final draw result. The response also includes `Location: /api/lottery/draws/{campaignMonth}/id/{drawId}` and `Retry-After: 1`
+or the final draw result. The response also includes `Location: /api/lottery/draws/{campaignMonth}/id/{drawId}` and
+`Retry-After: 1`
 so a browser can poll without holding an HTTP request open for the duration of the lottery processing.
 
 This prevents the dual-write failure where the draw commits but the process crashes before publishing the Kafka event.
@@ -260,18 +261,18 @@ docker compose down -v
 
 ## 8. Service URLs
 
-| Service                 | URL / port                                  | Purpose                              |
-|-------------------------|---------------------------------------------|--------------------------------------|
-| Lottery API / Nginx     | `http://localhost:8080`                     | Load-balanced REST API               |
-| Actuator health         | `http://localhost:8080/actuator/health`     | App health through the load balancer |
-| Prometheus metrics      | `http://localhost:8080/actuator/prometheus` | App metrics                           |
-| Prometheus UI           | `http://localhost:9090`                     | Query metrics                         |
-| Grafana                 | `http://localhost:3000`                     | Dashboards                            |
-| PostgreSQL primary      | `localhost:5433`                            | Authoritative write database          |
-| PostgreSQL replica      | `localhost:5434`                            | Streaming standby / read scale-out   |
-| Kafka bootstrap         | `localhost:9092`                            | Kafka broker 1 from the host          |
-| Primary exporter        | `http://localhost:9187/metrics`             | PostgreSQL primary metrics             |
-| Replica exporter        | `http://localhost:9188/metrics`             | PostgreSQL replica metrics             |
+| Service             | URL / port                                  | Purpose                              |
+|---------------------|---------------------------------------------|--------------------------------------|
+| Lottery API / Nginx | `http://localhost:8080`                     | Load-balanced REST API               |
+| Actuator health     | `http://localhost:8080/actuator/health`     | App health through the load balancer |
+| Prometheus metrics  | `http://localhost:8080/actuator/prometheus` | App metrics                          |
+| Prometheus UI       | `http://localhost:9090`                     | Query metrics                        |
+| Grafana             | `http://localhost:3000`                     | Dashboards                           |
+| PostgreSQL primary  | `localhost:5433`                            | Authoritative write database         |
+| PostgreSQL replica  | `localhost:5434`                            | Streaming standby / read scale-out   |
+| Kafka bootstrap     | `localhost:9092`                            | Kafka broker 1 from the host         |
+| Primary exporter    | `http://localhost:9187/metrics`             | PostgreSQL primary metrics           |
+| Replica exporter    | `http://localhost:9188/metrics`             | PostgreSQL replica metrics           |
 
 Grafana login is the `GRAFANA_USER` and `GRAFANA_PASSWORD` from `.env`.
 
@@ -303,6 +304,7 @@ For example:
   "alreadySubmitted": false
 }
 ```
+
 The HTTP `Location` header points to the same status URL and `Retry-After: 1` tells a client it can check again after
 about one second. Submitting again for the same user in the same monthly campaign returns the existing draw rather than
 creating another draw.
@@ -332,14 +334,14 @@ curl http://localhost:8080/api/lottery/inventory
 
 ### API summary
 
-| Method | Endpoint                         | Description                   |
-|--------|----------------------------------|-------------------------------|
-| POST   | `/api/lottery/draws`             | Submit one draw per user      |
-| GET    | `/api/lottery/draws/{campaignMonth}/id/{drawId}` | Get draw using partition key |
-| GET    | `/api/lottery/draws/id/{drawId}` | Backward-compatible draw lookup |
-| GET    | `/api/lottery/draws/{userId}`    | Get draw by user ID           |
-| GET    | `/api/lottery/prizes`            | Get fixed prize probabilities |
-| GET    | `/api/lottery/inventory`         | Get limited prize inventory   |
+| Method | Endpoint                                         | Description                     |
+|--------|--------------------------------------------------|---------------------------------|
+| POST   | `/api/lottery/draws`                             | Submit one draw per user        |
+| GET    | `/api/lottery/draws/{campaignMonth}/id/{drawId}` | Get draw using partition key    |
+| GET    | `/api/lottery/draws/id/{drawId}`                 | Backward-compatible draw lookup |
+| GET    | `/api/lottery/draws/{userId}`                    | Get draw by user ID             |
+| GET    | `/api/lottery/prizes`                            | Get fixed prize probabilities   |
+| GET    | `/api/lottery/inventory`                         | Get limited prize inventory     |
 
 This is a learning demo. The request body accepts `userId` directly. A production API should derive the user identity
 from an authenticated principal, not trust a client-supplied user ID.
@@ -699,7 +701,8 @@ controller quorum requirements.
 ### Outbox with multiple application instances
 
 Both app instances run the outbox publisher. `FOR UPDATE SKIP LOCKED` plus a lease means they can claim different rows
-without both publishing the same row at the same time. A crash after Kafka accepts a message can still produce a duplicate,
+without both publishing the same row at the same time. A crash after Kafka accepts a message can still produce a
+duplicate,
 so the worker remains idempotent.
 
 ### What this demonstrates

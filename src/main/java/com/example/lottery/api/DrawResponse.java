@@ -10,7 +10,7 @@ import java.time.Instant;
 public record DrawResponse(long id, long userId, String prizeType, String selectedPrizeType,
                            double probabilityPercent, int randomTicket, Instant createdAt,
                            boolean alreadyDrawn) {
-    public static DrawResponse from(DrawRecord r) {
+    public static DrawResponse from (DrawRecord r){
         return new DrawResponse(r.id(), r.userId(), r.prizeType().name(),
                 r.selectedPrizeType().name(), r.selectedPrizeType().probabilityPercent(),
                 r.randomTicket(), r.createdAt(), r.alreadyDrawn());

@@ -12,7 +12,7 @@ services:
       - lottery-data:/var/lib/postgresql/data
       - ./postgres-primary/initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U lottery -d lottery"]
+      test: [ "CMD-SHELL", "pg_isready -U lottery -d lottery" ]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -34,7 +34,7 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U lottery -d lottery"]
+      test: [ "CMD-SHELL", "pg_isready -U lottery -d lottery" ]
       interval: 5s
       timeout: 3s
       retries: 30
@@ -88,7 +88,7 @@ services:
     ports:
       - "9092:9092"
     healthcheck:
-      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      test: [ "CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1" ]
       interval: 10s
       timeout: 5s
       retries: 20
