@@ -8,6 +8,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
+import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -33,12 +34,14 @@ public class DrawController {
         if (submission.alreadySubmitted()) {
             return ResponseEntity.ok(response);
         }
-        return ResponseEntity.accepted().location(URI.create("/api/lottery/draws/id/" + response.drawId()))
+        return ResponseEntity.accepted()
+                .location(URI.create(response.statusUrl()))
+                .header("Retry-After", "1")
                 .body(response);
     }
 
     /**
-     * Lookup by user ID; returns PENDING until the Kafka worker finishes.
+     * Lookup the current monthly campaign draw by user ID; returns PENDING until the Kafka worker finishes.
      */
     @GetMapping("/draws/{userId}")
     public ResponseEntity<AsyncDrawResponse> getByUser(@PathVariable long userId) {
@@ -49,6 +52,16 @@ public class DrawController {
     @GetMapping("/draws/id/{drawId}")
     public ResponseEntity<AsyncDrawResponse> getByDrawId(@PathVariable long drawId) {
         AsyncDrawResponse result = drawService.findByDrawId(drawId);
+        return result == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(result);
+    }
+
+    /**
+     * Partition-aware status endpoint. Including the campaign month lets PostgreSQL prune directly to one monthly partition.
+     */
+    @GetMapping("/draws/{campaignMonth}/id/{drawId}")
+    public ResponseEntity<AsyncDrawResponse> getByCampaignAndDrawId(
+            @PathVariable LocalDate campaignMonth, @PathVariable long drawId) {
+        AsyncDrawResponse result = drawService.findByDrawId(campaignMonth, drawId);
         return result == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(result);
     }
 

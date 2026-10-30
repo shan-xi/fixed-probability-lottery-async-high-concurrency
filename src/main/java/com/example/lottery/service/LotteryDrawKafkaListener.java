@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDate;
+
 @Component
 public class LotteryDrawKafkaListener {
     private final ObjectMapper objectMapper;
@@ -19,6 +21,12 @@ public class LotteryDrawKafkaListener {
     public void onMessage(String payload) throws Exception {
         JsonNode node = objectMapper.readTree(payload);
         if (!node.hasNonNull("drawId")) throw new IllegalArgumentException("Missing drawId in Kafka event");
-        worker.process(node.get("drawId").asLong());
+        long drawId = node.get("drawId").asLong();
+        if (node.hasNonNull("campaignMonth")) {
+            worker.process(drawId, LocalDate.parse(node.get("campaignMonth").asText()));
+        } else {
+            // Backward-compatible handling for events published before campaignMonth was added.
+            worker.process(drawId);
+        }
     }
 }

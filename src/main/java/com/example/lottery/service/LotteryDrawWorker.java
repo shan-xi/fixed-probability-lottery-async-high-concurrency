@@ -7,6 +7,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -25,8 +26,19 @@ public class LotteryDrawWorker {
     @Transactional
     public void process(long drawId) {
         List<PendingDraw> rows = jdbc.query("""
-                SELECT id FROM lottery_draws WHERE id = ? AND status = 'PENDING' FOR UPDATE
-                """, (rs, n) -> new PendingDraw(rs.getLong(1)), drawId);
+                SELECT campaign_month FROM lottery_draws WHERE id = ? AND status = 'PENDING' FOR UPDATE
+                """, (rs, n) -> new PendingDraw(rs.getDate(1).toLocalDate()), drawId);
+        if (rows.isEmpty()) return;
+        process(drawId, rows.getFirst().campaignMonth());
+    }
+
+    @Transactional
+    public void process(long drawId, LocalDate campaignMonth) {
+        List<PendingDraw> rows = jdbc.query("""
+                SELECT campaign_month FROM lottery_draws
+                WHERE campaign_month = ? AND id = ? AND status = 'PENDING'
+                FOR UPDATE
+                """, (rs, n) -> new PendingDraw(rs.getDate(1).toLocalDate()), campaignMonth, drawId);
         if (rows.isEmpty()) return; // duplicate Kafka delivery or already completed
 
         PrizeDraw candidate = selector.draw();
@@ -37,8 +49,8 @@ public class LotteryDrawWorker {
         jdbc.update("""
                 UPDATE lottery_draws
                 SET prize_type = ?, selected_prize_type = ?, random_ticket = ?, status = 'COMPLETED'
-                WHERE id = ? AND status = 'PENDING'
-                """, finalPrize.name(), candidate.prizeType().name(), candidate.randomTicket(), drawId);
+                WHERE campaign_month = ? AND id = ? AND status = 'PENDING'
+                """, finalPrize.name(), candidate.prizeType().name(), candidate.randomTicket(), campaignMonth, drawId);
     }
 
     private boolean claimOneUnit(PrizeType prizeType) {
@@ -51,6 +63,6 @@ public class LotteryDrawWorker {
         return !claimed.isEmpty();
     }
 
-    private record PendingDraw(long id) {
+    private record PendingDraw(LocalDate campaignMonth) {
     }
 }

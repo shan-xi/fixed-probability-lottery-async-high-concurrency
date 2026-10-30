@@ -23,7 +23,7 @@ public class DrawService {
 
     /**
      * One draw per user. First insert the candidate outcome; only the transaction that wins the
-     * UNIQUE(user_id) race may attempt to consume limited inventory. This prevents duplicate
+     * UNIQUE(campaign_month, user_id) race may attempt to consume limited inventory. This prevents duplicate
      * requests from consuming quota. The insert, inventory claim, and final outcome are atomic.
      */
     @Transactional
@@ -32,9 +32,9 @@ public class DrawService {
         PrizeDraw candidate = selector.draw();
 
         List<DrawRecord> inserted = jdbc.query("""
-                        INSERT INTO lottery_draws(user_id, prize_type, selected_prize_type, random_ticket)
-                        VALUES (?, ?, ?, ?)
-                        ON CONFLICT (user_id) DO NOTHING
+                        INSERT INTO lottery_draws(campaign_month, user_id, prize_type, selected_prize_type, random_ticket, status)
+                        VALUES (date_trunc('month', CURRENT_TIMESTAMP)::date, ?, ?, ?, ?, 'COMPLETED')
+                        ON CONFLICT (campaign_month, user_id) DO NOTHING
                         RETURNING id, user_id, prize_type, selected_prize_type, random_ticket, created_at
                         """, (rs, rowNum) -> mapRecord(rs, false), userId,
                 candidate.prizeType().name(), candidate.prizeType().name(), candidate.randomTicket());
@@ -51,7 +51,7 @@ public class DrawService {
             if (newCount == null) {
                 // The probability mapping stays fixed. If the selected limited prize is sold out,
                 // this outcome becomes NO_PRIZE rather than redistributing its probability.
-                jdbc.update("UPDATE lottery_draws SET prize_type='NO_PRIZE' WHERE id=?", created.id());
+                jdbc.update("UPDATE lottery_draws SET prize_type='NO_PRIZE' WHERE campaign_month = date_trunc('month', CURRENT_TIMESTAMP)::date AND id=?", created.id());
                 return new DrawRecord(created.id(), created.userId(), PrizeType.NO_PRIZE,
                         created.selectedPrizeType(), created.randomTicket(), created.createdAt(), false);
             }
@@ -82,7 +82,7 @@ public class DrawService {
         try {
             return jdbc.queryForObject("""
                     SELECT id, user_id, prize_type, selected_prize_type, random_ticket, created_at
-                    FROM lottery_draws WHERE user_id = ?
+                    FROM lottery_draws WHERE campaign_month = date_trunc('month', CURRENT_TIMESTAMP)::date AND user_id = ?
                     """, (rs, rowNum) -> mapRecord(rs, alreadyDrawn), userId);
         } catch (EmptyResultDataAccessException e) {
             return null;

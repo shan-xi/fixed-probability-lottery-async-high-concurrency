@@ -3,8 +3,10 @@
 A Java 21 / Spring Boot 3.5 application demonstrating an asynchronous lottery draw pipeline using PostgreSQL, a
 transactional outbox, Apache Kafka, Prometheus, Grafana, and Docker Compose.
 
-> **Purpose:** learning, local development, and interview/system-design demonstrations. The included Kafka and
-> PostgreSQL deployments are single-node development configurations, not production high-availability infrastructure.
+> **Purpose:** learning, local development, and interview/system-design demonstrations. The Compose stack now models a
+> small HA topology: two stateless Spring Boot instances behind Nginx, a PostgreSQL primary plus streaming replica,
+> and a three-broker Kafka cluster. It is still a local HA exercise, not a production failover platform: PostgreSQL
+> promotion is manual and the containers are not distributed across availability zones.
 
 ## 1. Technology stack
 
@@ -13,7 +15,7 @@ transactional outbox, Apache Kafka, Prometheus, Grafana, and Docker Compose.
 | Java                  | 21                            |
 | Spring Boot           | 3.5.6                         |
 | PostgreSQL            | 16                            |
-| Apache Kafka          | 3.9.1, KRaft single node      |
+| Apache Kafka          | 3.9.1, 3-broker KRaft cluster |
 | Flyway                | Database migrations           |
 | HikariCP              | JDBC connection pool          |
 | Micrometer + Actuator | Application metrics           |
@@ -50,39 +52,45 @@ Client
   |
   | POST /api/lottery/draws
   v
-Spring Boot API
+Nginx load balancer
   |
-  | One PostgreSQL transaction
-  | 1. Insert PENDING draw
-  | 2. Insert outbox event
-  v
-PostgreSQL
+  +--> Spring Boot app-1
   |
-  | Outbox publisher polls and claims rows
-  | FOR UPDATE SKIP LOCKED + claim lease
-  v
-Kafka topic: lottery.draw.requested
-  |
-  | Consumer group: lottery-draw-workers
-  v
-LotteryDrawWorker
-  |
-  | One PostgreSQL transaction
-  | 1. Lock draw row / check PENDING
-  | 2. Select weighted prize
-  | 3. Atomically claim limited inventory
-  | 4. Save final result
-  v
-PostgreSQL
-  |
-  v
-Client polls draw status
+  +--> Spring Boot app-2
+          |
+          | One PostgreSQL transaction
+          | 1. Insert PENDING draw
+          | 2. Insert outbox event
+          v
+       PostgreSQL primary ===== streaming replica
+          |
+          | Outbox publisher claims rows
+          | FOR UPDATE SKIP LOCKED + lease
+          v
+       Kafka cluster (3 brokers)
+          |
+          | Consumer group: lottery-draw-workers
+          v
+       LotteryDrawWorker
+          |
+          | One PostgreSQL transaction on primary
+          | 1. Lock draw row / check PENDING
+          | 2. Select weighted prize
+          | 3. Atomically claim limited inventory
+          | 4. Save final result
+          v
+       PostgreSQL primary
+          |
+          v
+       Client polls draw status
 ```
 
 ### 3.1 API submission transaction
 
 `POST /api/lottery/draws` creates a `PENDING` draw and its outbox event in the **same PostgreSQL transaction**. The API
-returns `202 Accepted`; it does not wait for Kafka or the final draw result.
+returns `202 Accepted` immediately with `drawId`, `status`, `campaignMonth`, and `statusUrl`; it does not wait for Kafka
+or the final draw result. The response also includes `Location: /api/lottery/draws/{campaignMonth}/id/{drawId}` and `Retry-After: 1`
+so a browser can poll without holding an HTTP request open for the duration of the lottery processing.
 
 This prevents the dual-write failure where the draw commits but the process crashes before publishing the Kafka event.
 
@@ -144,6 +152,14 @@ quota.
 ├── .env.example
 └── README.md
 ```
+
+## 4.1 Database migrations
+
+This version intentionally uses **one Flyway migration only**: `V1__create_lottery_schema.sql`. The project is designed
+for fresh local databases, so there is no V2/V3/V4/V5/V6 migration chain and no legacy-table conversion step.
+
+The V1 migration creates the partitioned `lottery_draws` table, monthly partitions, prize inventory, transactional
+outbox, indexes, constraints, and the shared draw ID sequence in one clean schema definition.
 
 ## 5. Prerequisites
 
@@ -219,7 +235,7 @@ docker compose ps
 Follow application logs:
 
 ```bash
-docker compose logs -f app
+docker compose logs -f app-1 app-2
 ```
 
 Follow all services:
@@ -244,16 +260,18 @@ docker compose down -v
 
 ## 8. Service URLs
 
-| Service            | URL / port                                  | Purpose                     |
-|--------------------|---------------------------------------------|-----------------------------|
-| Lottery API        | `http://localhost:8080`                     | REST API                    |
-| Actuator health    | `http://localhost:8080/actuator/health`     | App health                  |
-| Prometheus metrics | `http://localhost:8080/actuator/prometheus` | Raw app metrics             |
-| Prometheus UI      | `http://localhost:9090`                     | Query metrics               |
-| Grafana            | `http://localhost:3000`                     | Dashboards                  |
-| PostgreSQL         | `localhost:5433`                            | Database                    |
-| Kafka              | `localhost:9092`                            | Local Kafka bootstrap       |
-| postgres_exporter  | `http://localhost:9187/metrics`             | PostgreSQL exporter metrics |
+| Service                 | URL / port                                  | Purpose                              |
+|-------------------------|---------------------------------------------|--------------------------------------|
+| Lottery API / Nginx     | `http://localhost:8080`                     | Load-balanced REST API               |
+| Actuator health         | `http://localhost:8080/actuator/health`     | App health through the load balancer |
+| Prometheus metrics      | `http://localhost:8080/actuator/prometheus` | App metrics                           |
+| Prometheus UI           | `http://localhost:9090`                     | Query metrics                         |
+| Grafana                 | `http://localhost:3000`                     | Dashboards                            |
+| PostgreSQL primary      | `localhost:5433`                            | Authoritative write database          |
+| PostgreSQL replica      | `localhost:5434`                            | Streaming standby / read scale-out   |
+| Kafka bootstrap         | `localhost:9092`                            | Kafka broker 1 from the host          |
+| Primary exporter        | `http://localhost:9187/metrics`             | PostgreSQL primary metrics             |
+| Replica exporter        | `http://localhost:9188/metrics`             | PostgreSQL replica metrics             |
 
 Grafana login is the `GRAFANA_USER` and `GRAFANA_PASSWORD` from `.env`.
 
@@ -267,15 +285,34 @@ curl -i -X POST http://localhost:8080/api/lottery/draws \
   -d '{"userId":1001}'
 ```
 
-A first submission should return `202 Accepted` with a draw ID and `PENDING` status. Submitting again for the same user
-returns the existing draw rather than creating another draw.
+A first submission should return `202 Accepted` with a `drawId`, `campaignMonth`, `status: PENDING`, and `statusUrl`.
+For example:
+
+```json
+{
+  "drawId": 12345,
+  "userId": 1001,
+  "campaignMonth": "2026-10-01",
+  "status": "PENDING",
+  "statusUrl": "/api/lottery/draws/2026-10-01/id/12345",
+  "prizeType": null,
+  "selectedPrizeType": null,
+  "probabilityPercent": null,
+  "randomTicket": null,
+  "createdAt": "2026-10-30T04:00:00Z",
+  "alreadySubmitted": false
+}
+```
+The HTTP `Location` header points to the same status URL and `Retry-After: 1` tells a client it can check again after
+about one second. Submitting again for the same user in the same monthly campaign returns the existing draw rather than
+creating another draw.
 
 ### 9.2 Poll by draw ID
 
-Replace `1` with the `drawId` returned by the POST:
+Replace `2026-10-01` and `1` with the `campaignMonth` and `drawId` returned by the POST:
 
 ```bash
-curl http://localhost:8080/api/lottery/draws/id/1
+curl http://localhost:8080/api/lottery/draws/2026-10-01/id/1
 ```
 
 ### 9.3 Poll by user ID
@@ -298,7 +335,8 @@ curl http://localhost:8080/api/lottery/inventory
 | Method | Endpoint                         | Description                   |
 |--------|----------------------------------|-------------------------------|
 | POST   | `/api/lottery/draws`             | Submit one draw per user      |
-| GET    | `/api/lottery/draws/id/{drawId}` | Get draw by draw ID           |
+| GET    | `/api/lottery/draws/{campaignMonth}/id/{drawId}` | Get draw using partition key |
+| GET    | `/api/lottery/draws/id/{drawId}` | Backward-compatible draw lookup |
 | GET    | `/api/lottery/draws/{userId}`    | Get draw by user ID           |
 | GET    | `/api/lottery/prizes`            | Get fixed prize probabilities |
 | GET    | `/api/lottery/inventory`         | Get limited prize inventory   |
@@ -319,7 +357,7 @@ The integration tests use Testcontainers and may require Docker to be running.
 For a container image build:
 
 ```bash
-docker compose build --no-cache app
+docker compose build --no-cache app-1 app-2
 ```
 
 ## 11. k6 load-test starter
@@ -529,7 +567,13 @@ Connect:
 psql -h localhost -p 5433 -U lottery -d lottery
 ```
 
-Current connections:
+Verify the replica is in recovery:
+
+```bash
+psql -h localhost -p 5434 -U lottery -d lottery -c "SELECT pg_is_in_recovery();"
+```
+
+Current connections on the primary:
 
 ```sql
 SELECT state, COUNT(*)
@@ -577,7 +621,99 @@ FROM lottery_outbox
 WHERE published_at IS NULL;
 ```
 
-## 14. Scaling and reliability notes
+## 14. Monthly PostgreSQL partitioning
+
+`lottery_draws` is partitioned by `campaign_month` using PostgreSQL `RANGE` partitioning. The application treats the
+lottery as a monthly campaign, so the business uniqueness rule is now:
+
+```text
+(campaign_month, user_id)
+```
+
+That means the same user can participate once in January and once again in February, while duplicate submissions inside
+the same campaign remain idempotent.
+
+Each normal campaign month has its own partition, for example:
+
+```text
+lottery_draws_2026_10
+lottery_draws_2026_11
+lottery_draws_2026_12
+```
+
+The single Flyway migration creates a rolling partition window plus a `DEFAULT` partition, so a fresh database is
+ready for the current campaign and a broad future window without follow-up migration scripts. If you deliberately open a
+campaign outside that pre-created window, PostgreSQL will place it in the `DEFAULT` partition; add an explicit monthly
+partition operationally before that campaign if partition pruning is required.
+
+Partitioning helps maintenance because old campaign partitions can eventually be archived/detached independently, and
+queries filtered by `campaign_month` can benefit from partition pruning. It is not a substitute for indexes, good query
+plans, or connection-pool sizing.
+
+### Important PostgreSQL detail
+
+A PostgreSQL partitioned table cannot enforce a global `UNIQUE(user_id)` constraint unless the partition key is part of
+the unique key. That is why this project uses `UNIQUE(campaign_month, user_id)`. The draw ID is still generated from one
+global sequence so IDs remain unique across partitions.
+
+## 15. Local HA topology
+
+The Compose file now starts the following minimum topology:
+
+```text
+                         +--> app-1 --+
+Client -> Nginx LB -------+            +--> PostgreSQL primary
+                         +--> app-2 --+          |
+                                                v
+                                         PostgreSQL replica
+
+                    app-1/app-2
+                         |
+                         +--> Kafka-1
+                         +--> Kafka-2
+                         +--> Kafka-3
+```
+
+### Spring Boot
+
+There are two stateless application instances. Either instance can accept the HTTP request, publish outbox events, or
+consume Kafka messages. The database remains the source of truth, so no session state is kept in the application
+container.
+
+### PostgreSQL
+
+`postgres` is the authoritative primary. `postgres-replica` is a streaming standby created with `pg_basebackup`. All
+correctness-critical lottery writes stay on the primary because inventory claims require strong consistency. The replica
+is there to demonstrate replication and provide a starting point for read scaling or manual failover.
+
+This local setup is **not automatic PostgreSQL HA**. If the primary dies, the replica does not automatically become the
+new application write endpoint. Production deployments normally use a managed PostgreSQL HA service or an orchestrator
+such as Patroni/repmgr plus a stable database endpoint and automated promotion.
+
+### Kafka
+
+The demo uses three Kafka brokers with replicated topic configuration (`replication.factor=3`, `min.insync.replicas=2`).
+If one broker is lost, the Kafka cluster can continue operating as long as the remaining brokers satisfy the ISR and
+controller quorum requirements.
+
+### Outbox with multiple application instances
+
+Both app instances run the outbox publisher. `FOR UPDATE SKIP LOCKED` plus a lease means they can claim different rows
+without both publishing the same row at the same time. A crash after Kafka accepts a message can still produce a duplicate,
+so the worker remains idempotent.
+
+### What this demonstrates
+
+This is a useful local minimum for learning horizontal scaling and HA concepts, but a real production design should add:
+
+- Multi-AZ placement rather than multiple containers on one Docker host.
+- Automatic PostgreSQL failover and a stable writer endpoint.
+- Backups, PITR, restore drills, and disaster-recovery planning.
+- TLS, secret management, authentication, network policies, and resource limits.
+- Load-balancer health checks and graceful connection draining.
+- Kafka rack/AZ awareness and proper capacity planning.
+
+## 16. Scaling and reliability notes
 
 - **API replicas:** stateless API instances can be scaled horizontally, but each instance adds a Hikari pool. Budget
   total connections, not just per-container connections.
@@ -594,7 +730,7 @@ WHERE published_at IS NULL;
 - **Monitoring:** watch p95/p99 latency, error rate, Hikari pending threads, active connections, PostgreSQL locks, CPU,
   disk I/O, transaction rate, outbox backlog and Kafka consumer lag.
 
-## 15. Production hardening checklist
+## 17. Production hardening checklist
 
 Before production, add and verify:
 
@@ -608,14 +744,15 @@ Before production, add and verify:
 - End-to-end load tests that poll to completion and report both submission and completion latency.
 - Structured logs, tracing, dashboards, SLOs and operational runbooks.
 
-## 16. Troubleshooting
+## 18. Troubleshooting
 
 **App cannot connect to PostgreSQL**
 
 ```bash
 docker compose ps
 docker compose logs postgres
-docker compose logs app
+docker compose logs app-1
+docker compose logs app-2
 ```
 
 Check `DB_PASSWORD` in `.env` and confirm the PostgreSQL health check passes.
@@ -623,16 +760,19 @@ Check `DB_PASSWORD` in `.env` and confirm the PostgreSQL health check passes.
 **Kafka is not ready**
 
 ```bash
-docker compose logs kafka
-docker compose logs app
+docker compose logs kafka-1
+docker compose logs kafka-2
+docker compose logs kafka-3
+docker compose logs app-1
 ```
 
-The app uses `kafka:9092` inside the Compose network. Use `localhost:9092` only from the host machine.
+The apps use `kafka-1:9092,kafka-2:9092,kafka-3:9092` inside the Compose network. Use `localhost:9092` only from the
+host machine.
 
 **Grafana shows no data**
 
 1. Check `docker compose ps`.
-2. Open `http://localhost:9090/targets`; both `lottery-app` and `postgres` should be `UP`.
+2. Open `http://localhost:9090/targets`; both app instances and both PostgreSQL exporters should be `UP`.
 3. Open `http://localhost:8080/actuator/prometheus` and confirm app metrics exist.
 4. Open `http://localhost:9187/metrics` and confirm exporter metrics exist.
 5. In Grafana, confirm the Prometheus data source URL is `http://prometheus:9090` (container-to-container address).

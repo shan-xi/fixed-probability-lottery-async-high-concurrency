@@ -1,1 +1,0 @@
-PASS: probability sum, interval boundaries, invalid-ticket checks.
