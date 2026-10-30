@@ -2,8 +2,8 @@ package com.example.lottery.integration;
 
 import com.example.lottery.LotteryApplication;
 import com.example.lottery.domain.DrawRecord;
-import com.example.lottery.service.AsyncDrawService;
 import com.example.lottery.service.DrawService;
+import com.example.lottery.service.AsyncDrawService;
 import com.example.lottery.service.LotteryDrawWorker;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -19,26 +19,15 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.*;
-
 import static org.junit.jupiter.api.Assertions.*;
 
 @Testcontainers
 @SpringBootTest(classes = LotteryApplication.class)
 class LotteryDrawConcurrencyIntegrationTest {
-    @Container
-    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine")
+    @Container static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine")
             .withDatabaseName("lottery").withUsername("lottery").withPassword("lottery");
-    @Autowired
-    DrawService service;
-    @Autowired
-    AsyncDrawService asyncDrawService;
-    @Autowired
-    LotteryDrawWorker worker;
-    @Autowired
-    JdbcTemplate jdbc;
 
-    @DynamicPropertySource
-    static void datasource(DynamicPropertyRegistry registry) {
+    @DynamicPropertySource static void datasource(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         registry.add("spring.datasource.username", POSTGRES::getUsername);
         registry.add("spring.datasource.password", POSTGRES::getPassword);
@@ -46,25 +35,25 @@ class LotteryDrawConcurrencyIntegrationTest {
         registry.add("lottery.outbox.poll-delay-ms", () -> "3600000");
     }
 
-    @BeforeEach
-    void resetDatabase() {
+    @Autowired DrawService service;
+    @Autowired AsyncDrawService asyncDrawService;
+    @Autowired LotteryDrawWorker worker;
+    @Autowired JdbcTemplate jdbc;
+
+    @BeforeEach void resetDatabase() {
         jdbc.execute("TRUNCATE TABLE lottery_outbox, lottery_draws RESTART IDENTITY CASCADE");
         jdbc.update("UPDATE lottery_prize_inventory SET quota=1, awarded_count=0 WHERE prize_type='PRIZE_1'");
         jdbc.update("UPDATE lottery_prize_inventory SET quota=10, awarded_count=0 WHERE prize_type='PRIZE_2'");
     }
 
-    @Test
-    void concurrentDuplicateRequestsReturnOnePersistentResultAndConsumeAtMostOneQuota() throws Exception {
+    @Test void concurrentDuplicateRequestsReturnOnePersistentResultAndConsumeAtMostOneQuota() throws Exception {
         int calls = 100;
         ExecutorService pool = Executors.newFixedThreadPool(32);
         CountDownLatch start = new CountDownLatch(1);
         try {
             List<Future<DrawRecord>> futures = new ArrayList<>();
             for (int i = 0; i < calls; i++) {
-                futures.add(pool.submit(() -> {
-                    start.await();
-                    return service.draw(90001);
-                }));
+                futures.add(pool.submit(() -> { start.await(); return service.draw(90001); }));
             }
             start.countDown();
             List<DrawRecord> results = new ArrayList<>();
@@ -78,8 +67,7 @@ class LotteryDrawConcurrencyIntegrationTest {
         }
     }
 
-    @Test
-    void limitedPrizeQuotasAreNeverExceededUnderConcurrentDraws() throws Exception {
+    @Test void limitedPrizeQuotasAreNeverExceededUnderConcurrentDraws() throws Exception {
         int users = 2_000;
         ExecutorService pool = Executors.newFixedThreadPool(40);
         CountDownLatch start = new CountDownLatch(1);
@@ -87,10 +75,7 @@ class LotteryDrawConcurrencyIntegrationTest {
             List<Future<DrawRecord>> futures = new ArrayList<>();
             for (int i = 0; i < users; i++) {
                 long userId = 200_000L + i;
-                futures.add(pool.submit(() -> {
-                    start.await();
-                    return service.draw(userId);
-                }));
+                futures.add(pool.submit(() -> { start.await(); return service.draw(userId); }));
             }
             start.countDown();
             for (Future<DrawRecord> f : futures) assertNotNull(f.get(90, TimeUnit.SECONDS));
@@ -108,8 +93,7 @@ class LotteryDrawConcurrencyIntegrationTest {
         }
     }
 
-    @Test
-    void exhaustedLimitedPrizeIsRecordedAsNoPrizeAndCandidateIsAuditable() {
+    @Test void exhaustedLimitedPrizeIsRecordedAsNoPrizeAndCandidateIsAuditable() {
         jdbc.update("UPDATE lottery_prize_inventory SET quota=0, awarded_count=0 WHERE prize_type IN ('PRIZE_1','PRIZE_2')");
         // A moderate number of draws makes it overwhelmingly likely that both limited ticket ranges are sampled.
         for (long userId = 300_000; userId < 302_000; userId++) service.draw(userId);
@@ -121,8 +105,7 @@ class LotteryDrawConcurrencyIntegrationTest {
     }
 
 
-    @Test
-    void asyncSubmissionAndOutboxAreAtomicAndIdempotent() {
+    @Test void asyncSubmissionAndOutboxAreAtomicAndIdempotent() {
         var first = asyncDrawService.submit(70001);
         var duplicate = asyncDrawService.submit(70001);
 

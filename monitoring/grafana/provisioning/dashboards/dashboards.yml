@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: Lottery
+    orgId: 1
+    folder: Lottery
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /etc/grafana/provisioning/dashboards

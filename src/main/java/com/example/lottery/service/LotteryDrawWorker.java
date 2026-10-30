@@ -9,17 +9,13 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
-/**
- * Idempotent worker: the database status transition is the deduplication guard.
- */
+/** Idempotent worker: the database status transition is the deduplication guard. */
 @Service
 public class LotteryDrawWorker {
     private final JdbcTemplate jdbc;
     private final WeightedPrizeSelector selector;
-
     public LotteryDrawWorker(JdbcTemplate jdbc, WeightedPrizeSelector selector) {
-        this.jdbc = jdbc;
-        this.selector = selector;
+        this.jdbc = jdbc; this.selector = selector;
     }
 
     @Transactional
@@ -50,7 +46,5 @@ public class LotteryDrawWorker {
                 """, (rs, n) -> rs.getInt(1), prizeType.name());
         return !claimed.isEmpty();
     }
-
-    private record PendingDraw(long id) {
-    }
+    private record PendingDraw(long id) { }
 }

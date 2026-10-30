@@ -3,9 +3,7 @@ package com.example.lottery.domain;
 import java.util.Arrays;
 import java.util.List;
 
-/**
- * Fixed probabilities are expressed in basis points: 100 basis points = 1%.
- */
+/** Fixed probabilities are expressed in basis points: 100 basis points = 1%. */
 public enum PrizeType {
     PRIZE_1(100),    // 1%, limited quota
     PRIZE_2(200),    // 2%, limited quota
@@ -23,6 +21,22 @@ public enum PrizeType {
     private static final List<PrizeType> WEIGHTED_PRIZES = Arrays.stream(values())
             .filter(PrizeType::isWeightedPrize).toList();
 
+    private final int probabilityBasisPoints;
+
+    PrizeType(int probabilityBasisPoints) {
+        this.probabilityBasisPoints = probabilityBasisPoints;
+    }
+
+    public int probabilityBasisPoints() { return probabilityBasisPoints; }
+    public double probabilityPercent() { return probabilityBasisPoints / 100.0; }
+    public boolean isWeightedPrize() { return this != NO_PRIZE; }
+    public boolean isLimited() { return this == PRIZE_1 || this == PRIZE_2; }
+    public static List<PrizeType> weightedPrizes() { return WEIGHTED_PRIZES; }
+
+    public static int configuredTotalBasisPoints() {
+        return WEIGHTED_PRIZES.stream().mapToInt(PrizeType::probabilityBasisPoints).sum();
+    }
+
     static {
         int total = configuredTotalBasisPoints();
         if (total != TOTAL_BASIS_POINTS) {
@@ -31,35 +45,5 @@ public enum PrizeType {
         if (WEIGHTED_PRIZES.stream().anyMatch(p -> p.probabilityBasisPoints <= 0)) {
             throw new IllegalStateException("Every weighted prize probability must be positive");
         }
-    }
-
-    private final int probabilityBasisPoints;
-
-    PrizeType(int probabilityBasisPoints) {
-        this.probabilityBasisPoints = probabilityBasisPoints;
-    }
-
-    public static List<PrizeType> weightedPrizes() {
-        return WEIGHTED_PRIZES;
-    }
-
-    public static int configuredTotalBasisPoints() {
-        return WEIGHTED_PRIZES.stream().mapToInt(PrizeType::probabilityBasisPoints).sum();
-    }
-
-    public int probabilityBasisPoints() {
-        return probabilityBasisPoints;
-    }
-
-    public double probabilityPercent() {
-        return probabilityBasisPoints / 100.0;
-    }
-
-    public boolean isWeightedPrize() {
-        return this != NO_PRIZE;
-    }
-
-    public boolean isLimited() {
-        return this == PRIZE_1 || this == PRIZE_2;
     }
 }

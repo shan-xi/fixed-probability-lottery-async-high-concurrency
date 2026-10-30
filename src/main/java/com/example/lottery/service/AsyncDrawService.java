@@ -8,19 +8,15 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Instant;
 import java.util.List;
 
 @Service
 public class AsyncDrawService {
     private final JdbcTemplate jdbc;
+    public AsyncDrawService(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
-    public AsyncDrawService(JdbcTemplate jdbc) {
-        this.jdbc = jdbc;
-    }
-
-    /**
-     * Idempotently creates the draw and its outbox event in one PostgreSQL transaction.
-     */
+    /** Idempotently creates the draw and its outbox event in one PostgreSQL transaction. */
     @Transactional
     public Submission submit(long userId) {
         if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
@@ -44,17 +40,13 @@ public class AsyncDrawService {
     public AsyncDrawResponse findByUserId(long userId) {
         return queryOne("SELECT id, user_id, status, prize_type, selected_prize_type, random_ticket, created_at FROM lottery_draws WHERE user_id = ?", userId);
     }
-
     public AsyncDrawResponse findByDrawId(long drawId) {
         return queryOne("SELECT id, user_id, status, prize_type, selected_prize_type, random_ticket, created_at FROM lottery_draws WHERE id = ?", drawId);
     }
 
     private AsyncDrawResponse queryOne(String sql, long value) {
-        try {
-            return jdbc.queryForObject(sql, (rs, n) -> map(rs, true), value);
-        } catch (EmptyResultDataAccessException e) {
-            return null;
-        }
+        try { return jdbc.queryForObject(sql, (rs, n) -> map(rs, true), value); }
+        catch (EmptyResultDataAccessException e) { return null; }
     }
 
     private AsyncDrawResponse map(ResultSet rs, boolean alreadySubmitted) throws SQLException {
@@ -69,6 +61,5 @@ public class AsyncDrawService {
                 probability, ticket, rs.getTimestamp("created_at").toInstant(), alreadySubmitted);
     }
 
-    public record Submission(AsyncDrawResponse response, boolean alreadySubmitted) {
-    }
+    public record Submission(AsyncDrawResponse response, boolean alreadySubmitted) { }
 }

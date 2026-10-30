@@ -7,9 +7,7 @@ import java.util.Map;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.LongAdder;
 
-/**
- * Dependency-free local stress test for the exact production prize-selection classes.
- */
+/** Dependency-free local stress test for the exact production prize-selection classes. */
 public class ConcurrencySmokeTest {
     public static void main(String[] args) throws Exception {
         final int draws = args.length > 0 ? Integer.parseInt(args[0]) : 100_000;

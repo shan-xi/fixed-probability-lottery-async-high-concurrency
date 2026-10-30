@@ -6,9 +6,15 @@ spring:
     username: ${DB_USERNAME:lottery}
     password: ${DB_PASSWORD:change-me}
     hikari:
-      maximum-pool-size: ${DB_POOL_SIZE:30}
+      # Keep total pools across all API/worker replicas below PostgreSQL max_connections.
+      maximum-pool-size: ${DB_POOL_SIZE:20}
       minimum-idle: ${DB_POOL_MIN_IDLE:5}
-      connection-timeout: 3000
+      connection-timeout: ${DB_CONNECTION_TIMEOUT_MS:3000}
+      idle-timeout: ${DB_IDLE_TIMEOUT_MS:600000}
+      max-lifetime: ${DB_MAX_LIFETIME_MS:1800000}
+      validation-timeout: 1000
+      pool-name: LotteryHikariPool
+      register-mbeans: true
   flyway:
     enabled: true
   kafka:
@@ -32,6 +38,12 @@ spring:
 server:
   port: ${SERVER_PORT:8080}
 management:
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
   endpoints:
     web:
       exposure:
@@ -50,3 +62,4 @@ lottery:
   outbox:
     poll-delay-ms: ${OUTBOX_POLL_DELAY_MS:250}
     batch-size: ${OUTBOX_BATCH_SIZE:100}
+    lease-seconds: ${OUTBOX_LEASE_SECONDS:60}

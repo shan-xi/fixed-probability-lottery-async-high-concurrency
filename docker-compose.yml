@@ -5,13 +5,42 @@ services:
       POSTGRES_DB: lottery
       POSTGRES_USER: lottery
       POSTGRES_PASSWORD: ${DB_PASSWORD:-change-me}
-    ports: [ "5433:5432" ]
-    volumes: [ "lottery-data:/var/lib/postgresql/data" ]
+    ports: ["5433:5432"]
+    volumes: ["lottery-data:/var/lib/postgresql/data"]
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U lottery -d lottery" ]
+      test: ["CMD-SHELL", "pg_isready -U lottery -d lottery"]
       interval: 5s
       timeout: 3s
       retries: 20
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.17.1
+    environment:
+      DATA_SOURCE_URI: postgres:5432/lottery?sslmode=disable
+      DATA_SOURCE_USER: lottery
+      DATA_SOURCE_PASS: ${DB_PASSWORD:-change-me}
+    ports: ["9187:9187"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports: ["9090:9090"]
+    depends_on:
+      - postgres-exporter
+      - app
+  grafana:
+    image: grafana/grafana:11.4.0
+    ports: ["3000:3000"]
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-change-this-grafana-password}
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
   kafka:
     image: apache/kafka:3.9.1
     hostname: kafka
@@ -28,9 +57,9 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_NUM_PARTITIONS: 12
-    ports: [ "9092:9092" ]
+    ports: ["9092:9092"]
     healthcheck:
-      test: [ "CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1" ]
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
       interval: 10s
       timeout: 5s
       retries: 20
@@ -40,15 +69,20 @@ services:
       DB_URL: jdbc:postgresql://postgres:5432/lottery
       DB_USERNAME: lottery
       DB_PASSWORD: ${DB_PASSWORD:-change-me}
-      DB_POOL_SIZE: ${DB_POOL_SIZE:-30}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-20}
+      DB_POOL_MIN_IDLE: ${DB_POOL_MIN_IDLE:-5}
+      DB_CONNECTION_TIMEOUT_MS: ${DB_CONNECTION_TIMEOUT_MS:-3000}
+      DB_IDLE_TIMEOUT_MS: ${DB_IDLE_TIMEOUT_MS:-600000}
+      DB_MAX_LIFETIME_MS: ${DB_MAX_LIFETIME_MS:-1800000}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_CONSUMER_CONCURRENCY: ${KAFKA_CONSUMER_CONCURRENCY:-3}
       LOTTERY_TOPIC: lottery.draw.requested
       OUTBOX_POLL_DELAY_MS: ${OUTBOX_POLL_DELAY_MS:-250}
       OUTBOX_BATCH_SIZE: ${OUTBOX_BATCH_SIZE:-100}
+      OUTBOX_LEASE_SECONDS: ${OUTBOX_LEASE_SECONDS:-60}
       PRIZE_1_QUOTA: ${PRIZE_1_QUOTA:-1}
       PRIZE_2_QUOTA: ${PRIZE_2_QUOTA:-10}
-    ports: [ "8080:8080" ]
+    ports: ["8080:8080"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -56,3 +90,4 @@ services:
         condition: service_healthy
 volumes:
   lottery-data:
+  grafana-data:

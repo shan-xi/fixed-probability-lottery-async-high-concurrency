@@ -6,9 +6,7 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
-/**
- * Seeds default quotas on a fresh database without overwriting operator-managed inventory.
- */
+/** Seeds default quotas on a fresh database without overwriting operator-managed inventory. */
 @Component
 public class LimitedPrizeInventoryInitializer implements ApplicationRunner {
     private final JdbcTemplate jdbc;

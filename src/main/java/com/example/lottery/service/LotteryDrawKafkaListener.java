@@ -9,10 +9,8 @@ import org.springframework.stereotype.Component;
 public class LotteryDrawKafkaListener {
     private final ObjectMapper objectMapper;
     private final LotteryDrawWorker worker;
-
     public LotteryDrawKafkaListener(ObjectMapper objectMapper, LotteryDrawWorker worker) {
-        this.objectMapper = objectMapper;
-        this.worker = worker;
+        this.objectMapper = objectMapper; this.worker = worker;
     }
 
     @KafkaListener(topics = "${lottery.kafka.topic}")
