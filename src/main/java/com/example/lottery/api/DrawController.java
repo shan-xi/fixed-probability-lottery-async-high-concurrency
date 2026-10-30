@@ -23,7 +23,9 @@ public class DrawController {
         this.inventoryService = inventoryService;
     }
 
-    /** Persist a PENDING draw + outbox event, then return immediately with 202 Accepted. */
+    /**
+     * Persist a PENDING draw + outbox event, then return immediately with 202 Accepted.
+     */
     @PostMapping("/draws")
     public ResponseEntity<AsyncDrawResponse> submit(@Valid @RequestBody DrawRequest request) {
         AsyncDrawService.Submission submission = drawService.submit(request.userId());
@@ -35,7 +37,9 @@ public class DrawController {
                 .body(response);
     }
 
-    /** Lookup by user ID; returns PENDING until the Kafka worker finishes. */
+    /**
+     * Lookup by user ID; returns PENDING until the Kafka worker finishes.
+     */
     @GetMapping("/draws/{userId}")
     public ResponseEntity<AsyncDrawResponse> getByUser(@PathVariable long userId) {
         AsyncDrawResponse result = drawService.findByUserId(userId);
@@ -56,5 +60,7 @@ public class DrawController {
     }
 
     @GetMapping("/inventory")
-    public List<PrizeInventoryService.InventoryView> inventory() { return inventoryService.list(); }
+    public List<PrizeInventoryService.InventoryView> inventory() {
+        return inventoryService.list();
+    }
 }

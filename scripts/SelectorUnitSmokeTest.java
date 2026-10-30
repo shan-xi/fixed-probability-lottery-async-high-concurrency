@@ -1,15 +1,24 @@
 import com.example.lottery.domain.PrizeType;
 import com.example.lottery.domain.WeightedPrizeSelector;
 
-/** Dependency-free assertions for selector behavior; complements the JUnit tests in src/test. */
+/**
+ * Dependency-free assertions for selector behavior; complements the JUnit tests in src/test.
+ */
 public class SelectorUnitSmokeTest {
     private static void eq(Object expected, Object actual, String message) {
-        if (!expected.equals(actual)) throw new AssertionError(message + ": expected=" + expected + ", actual=" + actual);
+        if (!expected.equals(actual))
+            throw new AssertionError(message + ": expected=" + expected + ", actual=" + actual);
     }
+
     private static void throwsIllegalArgument(Runnable action) {
-        try { action.run(); } catch (IllegalArgumentException expected) { return; }
+        try {
+            action.run();
+        } catch (IllegalArgumentException expected) {
+            return;
+        }
         throw new AssertionError("Expected IllegalArgumentException");
     }
+
     public static void main(String[] args) {
         WeightedPrizeSelector selector = new WeightedPrizeSelector();
         eq(10_000, PrizeType.configuredTotalBasisPoints(), "probability total");

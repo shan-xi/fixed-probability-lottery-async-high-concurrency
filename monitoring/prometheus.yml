@@ -6,8 +6,8 @@ scrape_configs:
   - job_name: lottery-app
     metrics_path: /actuator/prometheus
     static_configs:
-      - targets: ["app:8080"]
+      - targets: [ "app:8080" ]
 
   - job_name: postgres
     static_configs:
-      - targets: ["postgres-exporter:9187"]
+      - targets: [ "postgres-exporter:9187" ]

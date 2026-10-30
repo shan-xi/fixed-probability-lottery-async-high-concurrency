@@ -1,44 +1,47 @@
 # Fixed-Probability Lottery — Asynchronous High-Concurrency Demo
 
-A Java 21 / Spring Boot 3.5 application demonstrating an asynchronous lottery draw pipeline using PostgreSQL, a transactional outbox, Apache Kafka, Prometheus, Grafana, and Docker Compose.
+A Java 21 / Spring Boot 3.5 application demonstrating an asynchronous lottery draw pipeline using PostgreSQL, a
+transactional outbox, Apache Kafka, Prometheus, Grafana, and Docker Compose.
 
-> **Purpose:** learning, local development, and interview/system-design demonstrations. The included Kafka and PostgreSQL deployments are single-node development configurations, not production high-availability infrastructure.
+> **Purpose:** learning, local development, and interview/system-design demonstrations. The included Kafka and
+> PostgreSQL deployments are single-node development configurations, not production high-availability infrastructure.
 
 ## 1. Technology stack
 
-| Component | Version / role |
-|---|---|
-| Java | 21 |
-| Spring Boot | 3.5.6 |
-| PostgreSQL | 16 |
-| Apache Kafka | 3.9.1, KRaft single node |
-| Flyway | Database migrations |
-| HikariCP | JDBC connection pool |
-| Micrometer + Actuator | Application metrics |
-| Prometheus | Metrics collection |
-| Grafana | Metrics dashboards |
-| postgres_exporter | PostgreSQL metrics |
-| k6 | HTTP load-test starter script |
+| Component             | Version / role                |
+|-----------------------|-------------------------------|
+| Java                  | 21                            |
+| Spring Boot           | 3.5.6                         |
+| PostgreSQL            | 16                            |
+| Apache Kafka          | 3.9.1, KRaft single node      |
+| Flyway                | Database migrations           |
+| HikariCP              | JDBC connection pool          |
+| Micrometer + Actuator | Application metrics           |
+| Prometheus            | Metrics collection            |
+| Grafana               | Metrics dashboards            |
+| postgres_exporter     | PostgreSQL metrics            |
+| k6                    | HTTP load-test starter script |
 
 ## 2. Lottery business rules
 
 The weighted prize probabilities are fixed and total 100%.
 
-| Prize | Probability | Default quota |
-|---|---:|---:|
-| PRIZE_1 | 1% | 1 |
-| PRIZE_2 | 2% | 10 |
-| PRIZE_3 | 5% | Unlimited |
-| PRIZE_4 | 7% | Unlimited |
-| PRIZE_5 | 10% | Unlimited |
-| PRIZE_6 | 12% | Unlimited |
-| PRIZE_7 | 13% | Unlimited |
-| PRIZE_8 | 15% | Unlimited |
-| PRIZE_9 | 15% | Unlimited |
-| PRIZE_10 | 20% | Unlimited |
-| **Total** | **100%** | |
+| Prize     | Probability | Default quota |
+|-----------|------------:|--------------:|
+| PRIZE_1   |          1% |             1 |
+| PRIZE_2   |          2% |            10 |
+| PRIZE_3   |          5% |     Unlimited |
+| PRIZE_4   |          7% |     Unlimited |
+| PRIZE_5   |         10% |     Unlimited |
+| PRIZE_6   |         12% |     Unlimited |
+| PRIZE_7   |         13% |     Unlimited |
+| PRIZE_8   |         15% |     Unlimited |
+| PRIZE_9   |         15% |     Unlimited |
+| PRIZE_10  |         20% |     Unlimited |
+| **Total** |    **100%** |               |
 
-When a limited prize is selected after its quota has been exhausted, this demo converts the final result to `NO_PRIZE`. It does not redistribute the probability to other prizes. This policy must be clearly disclosed in real campaign terms.
+When a limited prize is selected after its quota has been exhausted, this demo converts the final result to `NO_PRIZE`.
+It does not redistribute the probability to other prizes. This policy must be clearly disclosed in real campaign terms.
 
 ## 3. Architecture and request flow
 
@@ -78,21 +81,27 @@ Client polls draw status
 
 ### 3.1 API submission transaction
 
-`POST /api/lottery/draws` creates a `PENDING` draw and its outbox event in the **same PostgreSQL transaction**. The API returns `202 Accepted`; it does not wait for Kafka or the final draw result.
+`POST /api/lottery/draws` creates a `PENDING` draw and its outbox event in the **same PostgreSQL transaction**. The API
+returns `202 Accepted`; it does not wait for Kafka or the final draw result.
 
 This prevents the dual-write failure where the draw commits but the process crashes before publishing the Kafka event.
 
 ### 3.2 Outbox claim and publish
 
-`OutboxBatchClaimer` claims a batch using `FOR UPDATE SKIP LOCKED`, assigns a `claim_token` and `locked_until`, and commits its short database transaction.
+`OutboxBatchClaimer` claims a batch using `FOR UPDATE SKIP LOCKED`, assigns a `claim_token` and `locked_until`, and
+commits its short database transaction.
 
-`OutboxBatchPublisher` performs Kafka network I/O **after** the claim transaction has completed. It marks an event as published only when the Kafka send receives acknowledgement. A failed send releases the current claim for retry. If the process crashes, the lease eventually expires and the row becomes eligible for another claim.
+`OutboxBatchPublisher` performs Kafka network I/O **after** the claim transaction has completed. It marks an event as
+published only when the Kafka send receives acknowledgement. A failed send releases the current claim for retry. If the
+process crashes, the lease eventually expires and the row becomes eligible for another claim.
 
-There is an unavoidable failure window: Kafka may accept an event, then the publisher may crash before PostgreSQL records `published_at`. The event can be delivered again. Therefore delivery is **at least once**, not exactly once.
+There is an unavoidable failure window: Kafka may accept an event, then the publisher may crash before PostgreSQL
+records `published_at`. The event can be delivered again. Therefore delivery is **at least once**, not exactly once.
 
 ### 3.3 Idempotent consumer
 
-The Kafka listener delegates to the worker. The worker checks/locks the draw row and processes only a draw still in `PENDING`. A duplicate event for a completed draw does not award another prize.
+The Kafka listener delegates to the worker. The worker checks/locks the draw row and processes only a draw still in
+`PENDING`. A duplicate event for a completed draw does not award another prize.
 
 ### 3.4 Limited prize inventory
 
@@ -107,7 +116,9 @@ WHERE prize_type = ?
 RETURNING awarded_count;
 ```
 
-The quota claim and final draw update run in the same transaction. Concurrent requests cannot exceed the configured quota. A scarce prize inventory row can become a hot row; that contention is the cost of enforcing a strict finite quota.
+The quota claim and final draw update run in the same transaction. Concurrent requests cannot exceed the configured
+quota. A scarce prize inventory row can become a hot row; that contention is the cost of enforcing a strict finite
+quota.
 
 ## 4. Repository layout
 
@@ -165,28 +176,31 @@ GRAFANA_USER=admin
 GRAFANA_PASSWORD=your-long-random-grafana-password
 ```
 
-Docker Compose automatically reads `.env` from the project directory. Do not commit `.env`; commit `.env.example` instead.
+Docker Compose automatically reads `.env` from the project directory. Do not commit `.env`; commit `.env.example`
+instead.
 
 ### Environment variables
 
-| Variable | Default in example | Meaning |
-|---|---:|---|
-| `DB_PASSWORD` | change-me | PostgreSQL and app DB password |
-| `DB_POOL_SIZE` | 20 | Hikari maximum connections per app instance |
-| `DB_POOL_MIN_IDLE` | 5 | Hikari minimum idle connections |
-| `DB_CONNECTION_TIMEOUT_MS` | 3000 | Wait limit for a connection from Hikari |
-| `DB_IDLE_TIMEOUT_MS` | 600000 | Hikari idle connection timeout |
-| `DB_MAX_LIFETIME_MS` | 1800000 | Hikari maximum connection lifetime |
-| `PRIZE_1_QUOTA` | 1 | PRIZE_1 inventory quota |
-| `PRIZE_2_QUOTA` | 10 | PRIZE_2 inventory quota |
-| `OUTBOX_POLL_DELAY_MS` | 250 | Delay between outbox polling runs |
-| `OUTBOX_BATCH_SIZE` | 100 | Maximum rows claimed per poll |
-| `OUTBOX_LEASE_SECONDS` | 60 | Lease duration for claimed outbox events |
-| `KAFKA_CONSUMER_CONCURRENCY` | 3 | Listener concurrency per app instance |
-| `GRAFANA_USER` | admin | Grafana local login |
-| `GRAFANA_PASSWORD` | change-me | Grafana local password |
+| Variable                     | Default in example | Meaning                                     |
+|------------------------------|-------------------:|---------------------------------------------|
+| `DB_PASSWORD`                |          change-me | PostgreSQL and app DB password              |
+| `DB_POOL_SIZE`               |                 20 | Hikari maximum connections per app instance |
+| `DB_POOL_MIN_IDLE`           |                  5 | Hikari minimum idle connections             |
+| `DB_CONNECTION_TIMEOUT_MS`   |               3000 | Wait limit for a connection from Hikari     |
+| `DB_IDLE_TIMEOUT_MS`         |             600000 | Hikari idle connection timeout              |
+| `DB_MAX_LIFETIME_MS`         |            1800000 | Hikari maximum connection lifetime          |
+| `PRIZE_1_QUOTA`              |                  1 | PRIZE_1 inventory quota                     |
+| `PRIZE_2_QUOTA`              |                 10 | PRIZE_2 inventory quota                     |
+| `OUTBOX_POLL_DELAY_MS`       |                250 | Delay between outbox polling runs           |
+| `OUTBOX_BATCH_SIZE`          |                100 | Maximum rows claimed per poll               |
+| `OUTBOX_LEASE_SECONDS`       |                 60 | Lease duration for claimed outbox events    |
+| `KAFKA_CONSUMER_CONCURRENCY` |                  3 | Listener concurrency per app instance       |
+| `GRAFANA_USER`               |              admin | Grafana local login                         |
+| `GRAFANA_PASSWORD`           |          change-me | Grafana local password                      |
 
-Pool size is **per application instance**. For example, three application instances with `DB_POOL_SIZE=20` can open up to 60 application connections. Keep the combined total below PostgreSQL's connection capacity and reserve connections for administration and other services.
+Pool size is **per application instance**. For example, three application instances with `DB_POOL_SIZE=20` can open up
+to 60 application connections. Keep the combined total below PostgreSQL's connection capacity and reserve connections
+for administration and other services.
 
 ## 7. Start the complete stack
 
@@ -230,16 +244,16 @@ docker compose down -v
 
 ## 8. Service URLs
 
-| Service | URL / port | Purpose |
-|---|---|---|
-| Lottery API | `http://localhost:8080` | REST API |
-| Actuator health | `http://localhost:8080/actuator/health` | App health |
-| Prometheus metrics | `http://localhost:8080/actuator/prometheus` | Raw app metrics |
-| Prometheus UI | `http://localhost:9090` | Query metrics |
-| Grafana | `http://localhost:3000` | Dashboards |
-| PostgreSQL | `localhost:5433` | Database |
-| Kafka | `localhost:9092` | Local Kafka bootstrap |
-| postgres_exporter | `http://localhost:9187/metrics` | PostgreSQL exporter metrics |
+| Service            | URL / port                                  | Purpose                     |
+|--------------------|---------------------------------------------|-----------------------------|
+| Lottery API        | `http://localhost:8080`                     | REST API                    |
+| Actuator health    | `http://localhost:8080/actuator/health`     | App health                  |
+| Prometheus metrics | `http://localhost:8080/actuator/prometheus` | Raw app metrics             |
+| Prometheus UI      | `http://localhost:9090`                     | Query metrics               |
+| Grafana            | `http://localhost:3000`                     | Dashboards                  |
+| PostgreSQL         | `localhost:5433`                            | Database                    |
+| Kafka              | `localhost:9092`                            | Local Kafka bootstrap       |
+| postgres_exporter  | `http://localhost:9187/metrics`             | PostgreSQL exporter metrics |
 
 Grafana login is the `GRAFANA_USER` and `GRAFANA_PASSWORD` from `.env`.
 
@@ -253,7 +267,8 @@ curl -i -X POST http://localhost:8080/api/lottery/draws \
   -d '{"userId":1001}'
 ```
 
-A first submission should return `202 Accepted` with a draw ID and `PENDING` status. Submitting again for the same user returns the existing draw rather than creating another draw.
+A first submission should return `202 Accepted` with a draw ID and `PENDING` status. Submitting again for the same user
+returns the existing draw rather than creating another draw.
 
 ### 9.2 Poll by draw ID
 
@@ -280,15 +295,16 @@ curl http://localhost:8080/api/lottery/inventory
 
 ### API summary
 
-| Method | Endpoint | Description |
-|---|---|---|
-| POST | `/api/lottery/draws` | Submit one draw per user |
-| GET | `/api/lottery/draws/id/{drawId}` | Get draw by draw ID |
-| GET | `/api/lottery/draws/{userId}` | Get draw by user ID |
-| GET | `/api/lottery/prizes` | Get fixed prize probabilities |
-| GET | `/api/lottery/inventory` | Get limited prize inventory |
+| Method | Endpoint                         | Description                   |
+|--------|----------------------------------|-------------------------------|
+| POST   | `/api/lottery/draws`             | Submit one draw per user      |
+| GET    | `/api/lottery/draws/id/{drawId}` | Get draw by draw ID           |
+| GET    | `/api/lottery/draws/{userId}`    | Get draw by user ID           |
+| GET    | `/api/lottery/prizes`            | Get fixed prize probabilities |
+| GET    | `/api/lottery/inventory`         | Get limited prize inventory   |
 
-This is a learning demo. The request body accepts `userId` directly. A production API should derive the user identity from an authenticated principal, not trust a client-supplied user ID.
+This is a learning demo. The request body accepts `userId` directly. A production API should derive the user identity
+from an authenticated principal, not trust a client-supplied user ID.
 
 ## 10. Run tests
 
@@ -308,7 +324,9 @@ docker compose build --no-cache app
 
 ## 11. k6 load-test starter
 
-The supplied `loadtest/lottery-async.js` exercises the asynchronous **submission endpoint** and checks for `202` or idempotent `200` responses. It does **not** poll each draw to completion, so it is not a full end-to-end completion-latency test.
+The supplied `loadtest/lottery-async.js` exercises the asynchronous **submission endpoint** and checks for `202` or
+idempotent `200` responses. It does **not** poll each draw to completion, so it is not a full end-to-end
+completion-latency test.
 
 Install k6, then from the project root:
 
@@ -321,9 +339,12 @@ k6 run \
   loadtest/lottery-async.js
 ```
 
-Use unique user IDs for each test run. Watch API latency, Hikari pool pressure, PostgreSQL activity, Kafka consumer progress, and application errors. Increase load gradually; more virtual users do not automatically mean higher throughput.
+Use unique user IDs for each test run. Watch API latency, Hikari pool pressure, PostgreSQL activity, Kafka consumer
+progress, and application errors. Increase load gradually; more virtual users do not automatically mean higher
+throughput.
 
-For a proper async end-to-end benchmark, extend the script to capture each returned `drawId`, poll until `COMPLETED` or timeout, and report submission latency separately from completion latency.
+For a proper async end-to-end benchmark, extend the script to capture each returned `drawId`, poll until `COMPLETED` or
+timeout, and report submission latency separately from completion latency.
 
 ## 12. Grafana: open and build a dashboard
 
@@ -333,7 +354,8 @@ For a proper async end-to-end benchmark, extend the script to capture each retur
 2. Open `http://localhost:3000`.
 3. Sign in using `GRAFANA_USER` and `GRAFANA_PASSWORD` from `.env`.
 4. Open **Dashboards** in the left navigation.
-5. The project provisions a Prometheus data source and a starter **Lottery Overview** dashboard automatically. If it does not appear immediately, refresh the page after the containers finish starting.
+5. The project provisions a Prometheus data source and a starter **Lottery Overview** dashboard automatically. If it
+   does not appear immediately, refresh the page after the containers finish starting.
 
 The dashboard is provisioned from:
 
@@ -343,7 +365,9 @@ monitoring/grafana/provisioning/dashboards/dashboards.yml
 monitoring/grafana/provisioning/dashboards/lottery-overview.json
 ```
 
-The dashboard JSON is editable in the Grafana UI. Provisioned dashboard files remain the source of truth: if you want a change to survive container recreation and remain in Git, export/download the dashboard JSON and save it back into the repository's provisioning directory.
+The dashboard JSON is editable in the Grafana UI. Provisioned dashboard files remain the source of truth: if you want a
+change to survive container recreation and remain in Git, export/download the dashboard JSON and save it back into the
+repository's provisioning directory.
 
 ### 12.2 Understand the dashboard layout
 
@@ -361,7 +385,8 @@ The starter dashboard contains panels for:
 - PostgreSQL transaction commits per second
 - JVM heap usage
 
-Some metrics only appear after the relevant workload has run. A panel showing `No data` can mean no requests have happened yet, the application has not exposed that metric, or the Prometheus scrape has not succeeded.
+Some metrics only appear after the relevant workload has run. A panel showing `No data` can mean no requests have
+happened yet, the application has not exposed that metric, or the Prometheus scrape has not succeeded.
 
 ### 12.3 Create a panel manually
 
@@ -372,10 +397,10 @@ Some metrics only appear after the relevant workload has run. A panel showing `N
 5. Switch to **Code** mode if the query editor opens in Builder mode.
 6. Enter a PromQL query from the examples below.
 7. Choose a visualization:
-   - **Time series** for rates, latency and connections over time.
-   - **Stat** for a current value or one-minute rate.
-   - **Gauge** for a value with a meaningful fixed limit, such as pool usage.
-   - **Table** for grouped labels or diagnostic details.
+    - **Time series** for rates, latency and connections over time.
+    - **Stat** for a current value or one-minute rate.
+    - **Gauge** for a value with a meaningful fixed limit, such as pool usage.
+    - **Table** for grouped labels or diagnostic details.
 8. Set the panel title, unit, legend and thresholds in the right-side options.
 9. Click **Apply**, then **Save dashboard**.
 
@@ -455,22 +480,25 @@ rate(pg_stat_database_xact_commit{datname="lottery"}[5m])
 sum(jvm_memory_used_bytes{area="heap", application="fixed-probability-lottery-async"}) / 1024 / 1024
 ```
 
-If a metric returns no series, open `http://localhost:9090/targets` and confirm both scrape targets are **UP**. Then inspect `http://localhost:8080/actuator/prometheus` or `http://localhost:9187/metrics` and search for the metric name. Micrometer converts dotted counter names to Prometheus names with underscores and a `_total` suffix for counters.
+If a metric returns no series, open `http://localhost:9090/targets` and confirm both scrape targets are **UP**. Then
+inspect `http://localhost:8080/actuator/prometheus` or `http://localhost:9187/metrics` and search for the metric name.
+Micrometer converts dotted counter names to Prometheus names with underscores and a `_total` suffix for counters.
 
 ### 12.5 Suggested panel units and thresholds
 
-| Panel | Visualization | Unit / guidance |
-|---|---|---|
-| HTTP request rate | Time series | requests/sec |
-| Average / p95 latency | Time series | milliseconds; set a threshold based on your SLO |
-| Hikari active / idle | Time series | connections |
-| Hikari pending | Time series | threads; sustained values above zero indicate pool pressure |
-| Outbox published / failures | Time series | events/sec |
-| PostgreSQL connections | Time series | connections; compare with server capacity |
-| PostgreSQL commits | Time series | transactions/sec |
-| JVM heap | Time series | MiB; compare with configured JVM memory |
+| Panel                       | Visualization | Unit / guidance                                             |
+|-----------------------------|---------------|-------------------------------------------------------------|
+| HTTP request rate           | Time series   | requests/sec                                                |
+| Average / p95 latency       | Time series   | milliseconds; set a threshold based on your SLO             |
+| Hikari active / idle        | Time series   | connections                                                 |
+| Hikari pending              | Time series   | threads; sustained values above zero indicate pool pressure |
+| Outbox published / failures | Time series   | events/sec                                                  |
+| PostgreSQL connections      | Time series   | connections; compare with server capacity                   |
+| PostgreSQL commits          | Time series   | transactions/sec                                            |
+| JVM heap                    | Time series   | MiB; compare with configured JVM memory                     |
 
-Avoid choosing arbitrary production alert thresholds. First run a representative workload, observe normal behavior, and define thresholds from service-level objectives and capacity tests.
+Avoid choosing arbitrary production alert thresholds. First run a representative workload, observe normal behavior, and
+define thresholds from service-level objectives and capacity tests.
 
 ### 12.6 Save and export your dashboard
 
@@ -482,12 +510,16 @@ Avoid choosing arbitrary production alert thresholds. First run a representative
 
 ### 12.7 Important monitoring limitation: outbox backlog
 
-The current app emits outbox claimed, published and failed counters. The starter dashboard does **not** expose a live pending-row count or oldest-pending-event age as a Prometheus metric. Those require an explicit custom gauge/collector or a suitable database exporter custom query. Do not mistake publish counters for queue depth. For operational monitoring, add gauges for:
+The current app emits outbox claimed, published and failed counters. The starter dashboard does **not** expose a live
+pending-row count or oldest-pending-event age as a Prometheus metric. Those require an explicit custom gauge/collector
+or a suitable database exporter custom query. Do not mistake publish counters for queue depth. For operational
+monitoring, add gauges for:
 
 - `lottery_outbox_pending_count`
 - `lottery_outbox_oldest_pending_age_seconds`
 
-These can be collected with a scheduled, lightweight query against `lottery_outbox`. Keep the query efficient and avoid polling the database too frequently.
+These can be collected with a scheduled, lightweight query against `lottery_outbox`. Keep the query efficient and avoid
+polling the database too frequently.
 
 ## 13. PostgreSQL operational checks
 
@@ -547,14 +579,20 @@ WHERE published_at IS NULL;
 
 ## 14. Scaling and reliability notes
 
-- **API replicas:** stateless API instances can be scaled horizontally, but each instance adds a Hikari pool. Budget total connections, not just per-container connections.
-- **Kafka consumers:** scale consumer instances/concurrency based on topic partition count, processing time and lag. In one consumer group, active parallelism is bounded by the number of partitions.
-- **Outbox publishers:** multiple publishers can safely claim disjoint rows with `FOR UPDATE SKIP LOCKED`. Lease duration must exceed normal processing time or be renewed safely.
+- **API replicas:** stateless API instances can be scaled horizontally, but each instance adds a Hikari pool. Budget
+  total connections, not just per-container connections.
+- **Kafka consumers:** scale consumer instances/concurrency based on topic partition count, processing time and lag. In
+  one consumer group, active parallelism is bounded by the number of partitions.
+- **Outbox publishers:** multiple publishers can safely claim disjoint rows with `FOR UPDATE SKIP LOCKED`. Lease
+  duration must exceed normal processing time or be renewed safely.
 - **At-least-once delivery:** duplicates are expected in failure windows. Keep consumers idempotent.
-- **Limited inventory:** strict quota enforcement creates contention on the inventory row for a scarce prize. Do not remove the atomic conditional update if the quota must never be exceeded.
-- **Read replicas:** may help read-heavy workloads, but replication lag means they should not be used for correctness-critical inventory claims or reads requiring immediate consistency.
+- **Limited inventory:** strict quota enforcement creates contention on the inventory row for a scarce prize. Do not
+  remove the atomic conditional update if the quota must never be exceeded.
+- **Read replicas:** may help read-heavy workloads, but replication lag means they should not be used for
+  correctness-critical inventory claims or reads requiring immediate consistency.
 - **PgBouncer / partitioning / sharding:** consider only after measuring actual bottlenecks and query patterns.
-- **Monitoring:** watch p95/p99 latency, error rate, Hikari pending threads, active connections, PostgreSQL locks, CPU, disk I/O, transaction rate, outbox backlog and Kafka consumer lag.
+- **Monitoring:** watch p95/p99 latency, error rate, Hikari pending threads, active connections, PostgreSQL locks, CPU,
+  disk I/O, transaction rate, outbox backlog and Kafka consumer lag.
 
 ## 15. Production hardening checklist
 

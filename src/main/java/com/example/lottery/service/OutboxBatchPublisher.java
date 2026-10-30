@@ -9,7 +9,9 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
-/** Publishes claimed events without holding PostgreSQL row locks during Kafka network I/O. */
+/**
+ * Publishes claimed events without holding PostgreSQL row locks during Kafka network I/O.
+ */
 @Service
 public class OutboxBatchPublisher {
     private final OutboxBatchClaimer claimer;
@@ -20,10 +22,10 @@ public class OutboxBatchPublisher {
     private final MeterRegistry meterRegistry;
 
     public OutboxBatchPublisher(OutboxBatchClaimer claimer, JdbcTemplate jdbc,
-            KafkaTemplate<String, String> kafka,
-            @Value("${lottery.kafka.topic}") String topic,
-            @Value("${lottery.outbox.lease-seconds:60}") int leaseSeconds,
-            MeterRegistry meterRegistry) {
+                                KafkaTemplate<String, String> kafka,
+                                @Value("${lottery.kafka.topic}") String topic,
+                                @Value("${lottery.outbox.lease-seconds:60}") int leaseSeconds,
+                                MeterRegistry meterRegistry) {
         this.claimer = claimer;
         this.jdbc = jdbc;
         this.kafka = kafka;

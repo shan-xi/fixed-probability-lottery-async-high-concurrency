@@ -32,11 +32,11 @@ public class DrawService {
         PrizeDraw candidate = selector.draw();
 
         List<DrawRecord> inserted = jdbc.query("""
-                INSERT INTO lottery_draws(user_id, prize_type, selected_prize_type, random_ticket)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT (user_id) DO NOTHING
-                RETURNING id, user_id, prize_type, selected_prize_type, random_ticket, created_at
-                """, (rs, rowNum) -> mapRecord(rs, false), userId,
+                        INSERT INTO lottery_draws(user_id, prize_type, selected_prize_type, random_ticket)
+                        VALUES (?, ?, ?, ?)
+                        ON CONFLICT (user_id) DO NOTHING
+                        RETURNING id, user_id, prize_type, selected_prize_type, random_ticket, created_at
+                        """, (rs, rowNum) -> mapRecord(rs, false), userId,
                 candidate.prizeType().name(), candidate.prizeType().name(), candidate.randomTicket());
 
         if (inserted.isEmpty()) {
@@ -59,7 +59,9 @@ public class DrawService {
         return created;
     }
 
-    /** Atomic conditional update: concurrent requests cannot claim beyond the configured quota. */
+    /**
+     * Atomic conditional update: concurrent requests cannot claim beyond the configured quota.
+     */
     private Integer claimOneUnit(PrizeType prizeType) {
         List<Integer> counts = jdbc.query("""
                 UPDATE lottery_prize_inventory
